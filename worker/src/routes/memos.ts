@@ -6,6 +6,7 @@ import * as relationDB from "../db/relation";
 import * as reactionDB from "../db/reaction";
 import * as shareDB from "../db/share";
 import * as settingDB from "../db/setting";
+import { createErrorBody } from "../error";
 
 type MemoApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -102,7 +103,13 @@ memoRoutes.post("/", authRequired, async (c) => {
 
   const contentLengthLimit = await getMemoContentLengthLimit(c.env.DB);
   if (contentLengthLimit > 0 && getUtf8ByteLength(content || "") > contentLengthLimit) {
-    return c.json({ error: `Memo content exceeds the maximum allowed length of ${contentLengthLimit} bytes.` }, 400);
+    return c.json(
+      createErrorBody(`Memo content exceeds the maximum allowed length of ${contentLengthLimit} bytes.`, {
+        errorKey: "message.memo-content-too-long",
+        errorParams: { size: contentLengthLimit },
+      }),
+      400,
+    );
   }
 
   const uid = generateUid();
@@ -256,7 +263,13 @@ memoRoutes.patch("/:id", authRequired, async (c) => {
   if (body.content !== undefined) {
     const contentLengthLimit = await getMemoContentLengthLimit(c.env.DB);
     if (contentLengthLimit > 0 && getUtf8ByteLength(body.content) > contentLengthLimit) {
-      return c.json({ error: `Memo content exceeds the maximum allowed length of ${contentLengthLimit} bytes.` }, 400);
+      return c.json(
+        createErrorBody(`Memo content exceeds the maximum allowed length of ${contentLengthLimit} bytes.`, {
+          errorKey: "message.memo-content-too-long",
+          errorParams: { size: contentLengthLimit },
+        }),
+        400,
+      );
     }
     updateData.content = body.content;
     const payload = parseMemoPayload(body.content);

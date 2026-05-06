@@ -472,11 +472,16 @@
     "new-password-not-match": "New passwords do not match.",
     "no-data": "No data found.",
     "password-changed": "Password Changed",
+    "password-auth-disabled": "Password authentication is disabled",
     "password-not-match": "Passwords do not match.",
     "restored-successfully": "Restored successfully",
     "succeed-copy-content": "Content copied successfully.",
     "succeed-copy-link": "Link copied successfully.",
     "update-succeed": "Update succeeded",
+    "user-registration-disabled": "User registration is disabled",
+    "nickname-change-disabled": "Changing nickname is disabled",
+    "username-change-admin-only": "Changing username requires admin privileges",
+    "username-change-disabled": "Changing username is disabled",
     "user-not-found": "User not found"
   },
   "reference": {

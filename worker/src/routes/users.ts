@@ -7,6 +7,7 @@ import * as memoDB from "../db/memo";
 import * as webhookDB from "../db/webhook";
 import { hashPassword } from "../auth/password";
 import { generatePAT, hashPAT } from "../auth/pat";
+import { createErrorBody } from "../error";
 
 type UserApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -179,7 +180,7 @@ userRoutes.post("/", async (c) => {
 
   // Admin can always create users; non-admin can self-register if allowed
   if (!isAdmin && (disallowRegistration || disallowPasswordAuth)) {
-    return c.json({ error: "User registration is disabled" }, 403);
+    return c.json(createErrorBody("User registration is disabled", { errorKey: "message.user-registration-disabled" }), 403);
   }
 
   const body = await c.req.json();
@@ -221,7 +222,7 @@ userRoutes.patch("/:username", authRequired, async (c) => {
 
   if (body.nickname !== undefined || body.displayName !== undefined) {
     if (user.id === currentUser.id && currentUser.role !== "ADMIN" && generalSetting.disallowChangeNickname === true) {
-      return c.json({ error: "Changing nickname is disabled" }, 403);
+      return c.json(createErrorBody("Changing nickname is disabled", { errorKey: "message.nickname-change-disabled" }), 403);
     }
     updateData.nickname = body.nickname ?? body.displayName;
   }
@@ -236,10 +237,10 @@ userRoutes.patch("/:username", authRequired, async (c) => {
       updateData.username = body.username;
     } else if (user.id === currentUser.id) {
       if (generalSetting.disallowChangeUsername === true) {
-        return c.json({ error: "Changing username is disabled" }, 403);
+        return c.json(createErrorBody("Changing username is disabled", { errorKey: "message.username-change-disabled" }), 403);
       }
       if (body.username !== user.username) {
-        return c.json({ error: "Changing username requires admin privileges" }, 403);
+        return c.json(createErrorBody("Changing username requires admin privileges", { errorKey: "message.username-change-admin-only" }), 403);
       }
     }
   }

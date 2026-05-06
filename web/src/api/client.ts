@@ -1,4 +1,5 @@
 import { getAccessToken, hasStoredToken, isTokenExpired, setAccessToken, REQUEST_TOKEN_EXPIRY_BUFFER_MS } from "../auth-state";
+import i18n from "../i18n";
 import { redirectOnAuthFailure } from "../utils/auth-redirect";
 
 let isRefreshing = false;
@@ -101,7 +102,14 @@ export async function apiRequest<T>(
 
   if (!resp.ok) {
     const errorData = await resp.json().catch(() => ({ error: resp.statusText }));
-    const err = new Error(errorData.error || `HTTP ${resp.status}`);
+    const translatedMessage =
+      errorData.errorKey && typeof errorData.errorKey === "string"
+        ? i18n.t(errorData.errorKey, (errorData.errorParams as Record<string, unknown>) || {})
+        : undefined;
+    const err = new Error(translatedMessage || errorData.error || `HTTP ${resp.status}`);
+    (err as any).serverMessage = errorData.error || `HTTP ${resp.status}`;
+    (err as any).errorKey = errorData.errorKey;
+    (err as any).errorParams = errorData.errorParams;
     (err as any).code = resp.status === 401 ? 16 : resp.status === 403 ? 7 : resp.status === 404 ? 5 : 2;
     throw err;
   }

@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from "../auth/password";
 import { authRequired } from "../middleware/auth";
 import { findUserByUsername, findUserById, createUser, countUsers } from "../db/user";
 import * as settingDB from "../db/setting";
+import { createErrorBody } from "../error";
 
 type AuthApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -45,7 +46,7 @@ authRoutes.post("/signin", async (c) => {
 
   const generalSetting = await getGeneralSetting(c.env.DB);
   if (generalSetting.disallowPasswordAuth) {
-    return c.json({ error: "Password authentication is disabled" }, 403);
+    return c.json(createErrorBody("Password authentication is disabled", { errorKey: "message.password-auth-disabled" }), 403);
   }
 
   const user = await findUserByUsername(c.env.DB, username);
@@ -121,7 +122,7 @@ authRoutes.post("/signup", async (c) => {
   if (userCount > 0) {
     const generalSetting = await getGeneralSetting(c.env.DB);
     if (generalSetting.disallowUserRegistration || generalSetting.disallowPasswordAuth) {
-      return c.json({ error: "User registration is disabled" }, 403);
+      return c.json(createErrorBody("User registration is disabled", { errorKey: "message.user-registration-disabled" }), 403);
     }
   }
 

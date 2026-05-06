@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Env, UserPayload } from "../types";
 import { authRequired } from "../middleware/auth";
 import * as settingDB from "../db/setting";
+import { createErrorBody } from "../error";
 
 type AttApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -69,7 +70,15 @@ attachmentRoutes.post("/", authRequired, async (c) => {
     const formData = await c.req.formData();
     const file = formData.get("file") as File | null;
     if (!file) return c.json({ error: "No file provided" }, 400);
-    if (file.size > maxUploadSize) return c.json({ error: `File too large. Maximum upload size is ${maxUploadSizeMb}MB.` }, 413);
+    if (file.size > maxUploadSize) {
+      return c.json(
+        createErrorBody(`File too large. Maximum upload size is ${maxUploadSizeMb}MB.`, {
+          errorKey: "message.maximum-upload-size-is",
+          errorParams: { size: maxUploadSizeMb },
+        }),
+        413,
+      );
+    }
     filename = file.name;
     fileType = file.type;
     fileData = await file.arrayBuffer();
@@ -79,7 +88,15 @@ attachmentRoutes.post("/", authRequired, async (c) => {
     fileType = body.type || "application/octet-stream";
     if (body.content) {
       const binary = atob(body.content);
-      if (binary.length > maxUploadSize) return c.json({ error: `File too large. Maximum upload size is ${maxUploadSizeMb}MB.` }, 413);
+      if (binary.length > maxUploadSize) {
+        return c.json(
+          createErrorBody(`File too large. Maximum upload size is ${maxUploadSizeMb}MB.`, {
+            errorKey: "message.maximum-upload-size-is",
+            errorParams: { size: maxUploadSizeMb },
+          }),
+          413,
+        );
+      }
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) {
         bytes[i] = binary.charCodeAt(i);
