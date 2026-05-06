@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -E \"\\\\.\\(sql|go\\)$\")",
-      "Bash(npm run *)"
-    ]
-  }
-}
