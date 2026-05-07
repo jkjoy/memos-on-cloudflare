@@ -1,4 +1,5 @@
 const STATE_STORAGE_KEY = "oauth_state";
+const STATE_STORAGE_PREFIX = "oauth_state:";
 const STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
 export type OAuthFlowMode = "signin" | "link";
@@ -88,7 +89,7 @@ export async function storeOAuthState(
   };
 
   try {
-    sessionStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(stateData));
+    persistOAuthState(stateData);
   } catch (error) {
     console.error("Failed to store OAuth state:", error);
     throw new Error("Failed to initialize OAuth flow");
@@ -103,30 +104,28 @@ export function validateOAuthState(
   stateParam: string,
 ): { identityProviderName: string; flowMode: OAuthFlowMode; returnUrl?: string; linkingUserName?: string; codeVerifier?: string } | null {
   try {
-    const storedData = sessionStorage.getItem(STATE_STORAGE_KEY);
-    if (!storedData) {
+    const stateData = readOAuthState(stateParam);
+    if (!stateData) {
       console.error("No OAuth state found in storage");
       return null;
     }
 
-    const stateData: OAuthState = JSON.parse(storedData);
-
     // Check if state has expired
     if (Date.now() - stateData.timestamp > STATE_EXPIRY_MS) {
       console.error("OAuth state has expired");
-      sessionStorage.removeItem(STATE_STORAGE_KEY);
+      removeOAuthState(stateData.state);
       return null;
     }
 
     // Validate state matches (CSRF protection)
     if (stateData.state !== stateParam) {
       console.error("OAuth state mismatch - possible CSRF attack");
-      sessionStorage.removeItem(STATE_STORAGE_KEY);
+      removeOAuthState(stateData.state);
       return null;
     }
 
     // State is valid, clean up and return data
-    sessionStorage.removeItem(STATE_STORAGE_KEY);
+    removeOAuthState(stateData.state);
     return {
       identityProviderName: stateData.identityProviderName,
       flowMode: stateData.flowMode || "signin",
@@ -136,7 +135,7 @@ export function validateOAuthState(
     };
   } catch (error) {
     console.error("Failed to validate OAuth state:", error);
-    sessionStorage.removeItem(STATE_STORAGE_KEY);
+    removeOAuthState(stateParam);
     return null;
   }
 }
@@ -144,17 +143,119 @@ export function validateOAuthState(
 // Clean up expired OAuth states (call on app init)
 export function cleanupExpiredOAuthState(): void {
   try {
-    const storedData = sessionStorage.getItem(STATE_STORAGE_KEY);
-    if (!storedData) {
-      return;
-    }
+    cleanupExpiredOAuthStatesInStorage(sessionStorage);
+    cleanupExpiredOAuthStatesInStorage(localStorage);
+  } catch {
+    // If cleanup fails for one storage, remove the legacy key from both.
+    sessionStorage.removeItem(STATE_STORAGE_KEY);
+    localStorage.removeItem(STATE_STORAGE_KEY);
+  }
+}
 
-    const stateData: OAuthState = JSON.parse(storedData);
-    if (Date.now() - stateData.timestamp > STATE_EXPIRY_MS) {
-      sessionStorage.removeItem(STATE_STORAGE_KEY);
+function persistOAuthState(stateData: OAuthState): void {
+  const payload = JSON.stringify(stateData);
+  const stateKey = getOAuthStateKey(stateData.state);
+
+  sessionStorage.setItem(stateKey, payload);
+  sessionStorage.setItem(STATE_STORAGE_KEY, payload);
+
+  try {
+    localStorage.setItem(stateKey, payload);
+    localStorage.setItem(STATE_STORAGE_KEY, payload);
+  } catch {
+    // localStorage can be unavailable in privacy modes. sessionStorage remains
+    // the primary store; localStorage is only a resilience fallback.
+  }
+}
+
+function readOAuthState(stateParam: string): OAuthState | null {
+  const stateKey = getOAuthStateKey(stateParam);
+  const fromSession = parseOAuthState(sessionStorage.getItem(stateKey));
+  if (fromSession) {
+    return fromSession;
+  }
+
+  const fromLocal = parseOAuthState(safeGetLocalStorageItem(stateKey));
+  if (fromLocal) {
+    try {
+      sessionStorage.setItem(stateKey, JSON.stringify(fromLocal));
+    } catch {
+      // Best effort only.
+    }
+    return fromLocal;
+  }
+
+  const legacy = parseOAuthState(sessionStorage.getItem(STATE_STORAGE_KEY)) ?? parseOAuthState(safeGetLocalStorageItem(STATE_STORAGE_KEY));
+  if (legacy && legacy.state === stateParam) {
+    return legacy;
+  }
+
+  return null;
+}
+
+function removeOAuthState(stateParam: string): void {
+  const stateKey = getOAuthStateKey(stateParam);
+  sessionStorage.removeItem(stateKey);
+
+  const legacy = parseOAuthState(sessionStorage.getItem(STATE_STORAGE_KEY));
+  if (legacy?.state === stateParam) {
+    sessionStorage.removeItem(STATE_STORAGE_KEY);
+  }
+
+  try {
+    localStorage.removeItem(stateKey);
+    const localLegacy = parseOAuthState(localStorage.getItem(STATE_STORAGE_KEY));
+    if (localLegacy?.state === stateParam) {
+      localStorage.removeItem(STATE_STORAGE_KEY);
     }
   } catch {
-    // If parsing fails, remove the corrupted data
-    sessionStorage.removeItem(STATE_STORAGE_KEY);
+    // Ignore localStorage failures during cleanup.
+  }
+}
+
+function cleanupExpiredOAuthStatesInStorage(storage: Storage): void {
+  const keysToRemove: string[] = [];
+
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (!key) {
+      continue;
+    }
+    if (key !== STATE_STORAGE_KEY && !key.startsWith(STATE_STORAGE_PREFIX)) {
+      continue;
+    }
+
+    const stateData = parseOAuthState(storage.getItem(key));
+    if (!stateData || Date.now() - stateData.timestamp > STATE_EXPIRY_MS) {
+      keysToRemove.push(key);
+    }
+  }
+
+  for (const key of keysToRemove) {
+    storage.removeItem(key);
+  }
+}
+
+function getOAuthStateKey(state: string): string {
+  return `${STATE_STORAGE_PREFIX}${state}`;
+}
+
+function parseOAuthState(value: string | null): OAuthState | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as OAuthState;
+  } catch {
+    return null;
+  }
+}
+
+function safeGetLocalStorageItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
   }
 }
