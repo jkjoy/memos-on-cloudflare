@@ -7,6 +7,7 @@ import * as reactionDB from "../db/reaction";
 import * as shareDB from "../db/share";
 import * as settingDB from "../db/setting";
 import { createErrorBody } from "../error";
+import { deleteCachedKeys, getCachedJson, putCachedJson, sha256Hex } from "../cache";
 
 type MemoApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -29,6 +30,13 @@ const getMemoContentLengthLimit = async (db: D1Database) => {
 
 function generateUid(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 22);
+}
+
+interface LinkMetadata {
+  url?: string;
+  title: string;
+  description: string;
+  image: string;
 }
 
 function parseMemoPayload(content: string) {
@@ -76,6 +84,18 @@ function formatMemo(memo: memoDB.MemoRow, creatorUsername?: string) {
     location: payload.location || null,
     parent: payload.parent || "",
   };
+}
+
+function createPlaceholders(count: number) {
+  return Array.from({ length: count }, () => "?").join(", ");
+}
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 async function getMemoAttachments(db: D1Database, memoId: number, memoUid: string) {
@@ -126,14 +146,26 @@ function formatReaction(reaction: reactionDB.ReactionRow, creatorUsername?: stri
   };
 }
 
+async function resolveUsernamesByIds(db: D1Database, ids: number[]): Promise<Map<number, string>> {
+  const uniqueIds = [...new Set(ids)].filter((id) => Number.isFinite(id));
+  const usernameMap = new Map<number, string>();
+  if (uniqueIds.length === 0) return usernameMap;
+
+  for (const chunk of chunkValues(uniqueIds, 900)) {
+    const { results } = await db.prepare(
+      `SELECT id, username FROM user WHERE id IN (${createPlaceholders(chunk.length)})`
+    ).bind(...chunk).all<{ id: number; username: string }>();
+
+    for (const user of results) {
+      usernameMap.set(user.id, user.username);
+    }
+  }
+  return usernameMap;
+}
+
 async function getMemoReactions(db: D1Database, memoUid: string) {
   const reactions = await reactionDB.listReactions(db, memoUid);
-  const creatorIds = [...new Set(reactions.map((r) => r.creator_id))];
-  const usernameMap = new Map<number, string>();
-  for (const id of creatorIds) {
-    const user = await db.prepare("SELECT username FROM user WHERE id = ?").bind(id).first<{ username: string }>();
-    if (user) usernameMap.set(id, user.username);
-  }
+  const usernameMap = await resolveUsernamesByIds(db, reactions.map((r) => r.creator_id));
   return reactions.map((r) => formatReaction(r, usernameMap.get(r.creator_id)));
 }
 
@@ -161,15 +193,153 @@ async function enrichMemo(db: D1Database, memo: memoDB.MemoRow, creatorUsername?
 }
 
 async function resolveCreatorUsernames(db: D1Database, memos: memoDB.MemoRow[]): Promise<Map<number, string>> {
-  const creatorIds = [...new Set(memos.map((m) => m.creator_id))];
-  const usernameMap = new Map<number, string>();
-  if (creatorIds.length === 0) return usernameMap;
+  return resolveUsernamesByIds(db, memos.map((m) => m.creator_id));
+}
 
-  for (const id of creatorIds) {
-    const user = await db.prepare("SELECT username FROM user WHERE id = ?").bind(id).first<{ username: string }>();
-    if (user) usernameMap.set(id, user.username);
+async function listAttachmentRowsByMemoIds(db: D1Database, memoIds: number[]) {
+  const rows: any[] = [];
+  for (const chunk of chunkValues(memoIds, 900)) {
+    const { results } = await db.prepare(
+      `SELECT * FROM attachment WHERE memo_id IN (${createPlaceholders(chunk.length)}) ORDER BY memo_id ASC, created_ts ASC`
+    ).bind(...chunk).all<any>();
+    rows.push(...results);
   }
-  return usernameMap;
+  return rows;
+}
+
+async function listRelationRowsByMemoIds(db: D1Database, memoIds: number[]) {
+  const rows: relationDB.RelationRow[] = [];
+  for (const chunk of chunkValues(memoIds, 450)) {
+    const placeholders = createPlaceholders(chunk.length);
+    const { results } = await db.prepare(
+      `SELECT * FROM memo_relation WHERE memo_id IN (${placeholders}) OR related_memo_id IN (${placeholders})`
+    ).bind(...chunk, ...chunk).all<relationDB.RelationRow>();
+    rows.push(...results);
+  }
+  return rows;
+}
+
+async function listReactionRowsByContentIds(db: D1Database, contentIds: string[]) {
+  const rows: reactionDB.ReactionRow[] = [];
+  for (const chunk of chunkValues(contentIds, 900)) {
+    const { results } = await db.prepare(
+      `SELECT * FROM reaction WHERE content_id IN (${createPlaceholders(chunk.length)}) ORDER BY content_id ASC, created_ts ASC`
+    ).bind(...chunk).all<reactionDB.ReactionRow>();
+    rows.push(...results);
+  }
+  return rows;
+}
+
+async function getMemoSnippetMapByIds(db: D1Database, memoIds: number[]) {
+  const memoMap = new Map<number, { uid: string; content: string }>();
+  const uniqueIds = [...new Set(memoIds)];
+  for (const chunk of chunkValues(uniqueIds, 900)) {
+    const { results } = await db.prepare(
+      `SELECT id, uid, content FROM memo WHERE id IN (${createPlaceholders(chunk.length)})`
+    ).bind(...chunk).all<{ id: number; uid: string; content: string }>();
+    for (const memo of results) {
+      memoMap.set(memo.id, memo);
+    }
+  }
+  return memoMap;
+}
+
+async function enrichMemos(db: D1Database, memos: memoDB.MemoRow[], creatorUsernameMap?: Map<number, string>) {
+  if (memos.length === 0) {
+    return [];
+  }
+
+  const memoIds = memos.map((m) => m.id);
+  const memoUids = memos.map((m) => m.uid);
+  const memoUidById = new Map(memos.map((m) => [m.id, m.uid]));
+  const memoIdSet = new Set(memoIds);
+
+  const [
+    attachmentRows,
+    relationRows,
+    reactionRows,
+  ] = await Promise.all([
+    listAttachmentRowsByMemoIds(db, memoIds),
+    listRelationRowsByMemoIds(db, memoIds),
+    listReactionRowsByContentIds(db, memoUids),
+  ]);
+
+  const attachmentsByMemoId = new Map<number, any[]>();
+  for (const att of attachmentRows) {
+    const memoUid = memoUidById.get(att.memo_id);
+    if (!memoUid) continue;
+    const attachments = attachmentsByMemoId.get(att.memo_id) || [];
+    attachments.push({
+      id: att.id,
+      name: `attachments/${att.uid}`,
+      uid: att.uid,
+      createTime: new Date(att.created_ts * 1000).toISOString(),
+      updateTime: new Date((att.updated_ts || att.created_ts) * 1000).toISOString(),
+      filename: att.filename,
+      type: att.type,
+      size: att.size,
+      memo: `memos/${memoUid}`,
+      externalLink: "",
+      motionMedia: (() => {
+        try {
+          return att.payload ? JSON.parse(att.payload).motionMedia : undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
+    });
+    attachmentsByMemoId.set(att.memo_id, attachments);
+  }
+
+  const relationMemoIds = relationRows.flatMap((relation) => [relation.memo_id, relation.related_memo_id]);
+  const relationMemoMap = await getMemoSnippetMapByIds(db, relationMemoIds);
+
+  const relationsByMemoId = new Map<number, any[]>();
+  for (const relation of relationRows) {
+    const memo = relationMemoMap.get(relation.memo_id);
+    const relatedMemo = relationMemoMap.get(relation.related_memo_id);
+    const formattedRelation = {
+      memo: memo ? { name: `memos/${memo.uid}`, snippet: memo.content.slice(0, 120) } : undefined,
+      relatedMemo: relatedMemo ? { name: `memos/${relatedMemo.uid}`, snippet: relatedMemo.content.slice(0, 120) } : undefined,
+      type: relation.type,
+    };
+
+    if (memoIdSet.has(relation.memo_id)) {
+      const relations = relationsByMemoId.get(relation.memo_id) || [];
+      relations.push(formattedRelation);
+      relationsByMemoId.set(relation.memo_id, relations);
+    }
+    if (memoIdSet.has(relation.related_memo_id) && relation.related_memo_id !== relation.memo_id) {
+      const relations = relationsByMemoId.get(relation.related_memo_id) || [];
+      relations.push(formattedRelation);
+      relationsByMemoId.set(relation.related_memo_id, relations);
+    }
+  }
+
+  const reactionUsernameMap = await resolveUsernamesByIds(db, reactionRows.map((r) => r.creator_id));
+  const reactionsByContentId = new Map<string, ReturnType<typeof formatReaction>[]>();
+  for (const reaction of reactionRows) {
+    const reactions = reactionsByContentId.get(reaction.content_id) || [];
+    reactions.push(formatReaction(reaction, reactionUsernameMap.get(reaction.creator_id)));
+    reactionsByContentId.set(reaction.content_id, reactions);
+  }
+
+  return memos.map((memo) => ({
+    ...formatMemo(memo, creatorUsernameMap?.get(memo.creator_id)),
+    attachments: attachmentsByMemoId.get(memo.id) || [],
+    relations: relationsByMemoId.get(memo.id) || [],
+    reactions: reactionsByContentId.get(memo.uid) || [],
+  }));
+}
+
+async function invalidateMemoDerivedCaches(cache: KVNamespace | undefined, usernames: Array<string | undefined>) {
+  const keys = ["user:stats:all", "instance:stats"];
+  for (const username of usernames) {
+    if (username) {
+      keys.push(`user:stats:${username}`);
+    }
+  }
+  await deleteCachedKeys(cache, keys);
 }
 
 function getAttachmentReference(value: unknown): string {
@@ -183,6 +353,38 @@ function getAttachmentReference(value: unknown): string {
     if (typeof attachment.id === "number" || typeof attachment.id === "string") return String(attachment.id);
   }
   return "";
+}
+
+async function getLinkMetadata(env: Env, url: string, includeUrl = false): Promise<LinkMetadata> {
+  const cacheKey = `link-metadata:${await sha256Hex(url)}`;
+  const cached = await getCachedJson<LinkMetadata>(env.CACHE, cacheKey);
+  if (cached) {
+    return includeUrl ? { ...cached, url } : cached;
+  }
+
+  let metadata: LinkMetadata;
+  try {
+    const resp = await fetch(url, {
+      headers: { "User-Agent": "cfmemos-bot/1.0" },
+      redirect: "follow",
+    });
+    const html = await resp.text();
+
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+    const imageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+
+    metadata = {
+      title: titleMatch?.[1]?.trim() || "",
+      description: descMatch?.[1]?.trim() || "",
+      image: imageMatch?.[1]?.trim() || "",
+    };
+  } catch {
+    metadata = { title: "", description: "", image: "" };
+  }
+
+  await putCachedJson(env.CACHE, cacheKey, metadata, 60 * 60 * 24 * 14);
+  return includeUrl ? { ...metadata, url } : metadata;
 }
 
 async function resolveAttachmentIds(db: D1Database, user: UserPayload, references: unknown[]): Promise<number[]> {
@@ -266,6 +468,7 @@ memoRoutes.post("/", authRequired, async (c) => {
     await setMemoAttachments(c.env.DB, memo.id, user, body.attachments);
   }
 
+  await invalidateMemoDerivedCaches(c.env.CACHE, [user.username]);
   return c.json(await enrichMemo(c.env.DB, memo, user.username), 201);
 });
 
@@ -352,7 +555,7 @@ memoRoutes.get("/", authOptional, async (c) => {
   const usernameMap = await resolveCreatorUsernames(c.env.DB, filtered);
 
   return c.json({
-    memos: await Promise.all(filtered.map((m) => enrichMemo(c.env.DB, m, usernameMap.get(m.creator_id)))),
+    memos: await enrichMemos(c.env.DB, filtered, usernameMap),
     nextPageToken,
     totalSize: total,
   });
@@ -443,6 +646,7 @@ memoRoutes.patch("/:id", authRequired, async (c) => {
   }
 
   const creatorName = updated.creator_id === user.id ? user.username : (await c.env.DB.prepare("SELECT username FROM user WHERE id = ?").bind(updated.creator_id).first<{ username: string }>())?.username;
+  await invalidateMemoDerivedCaches(c.env.CACHE, [creatorName]);
   return c.json(await enrichMemo(c.env.DB, updated, creatorName));
 });
 
@@ -465,7 +669,9 @@ memoRoutes.delete("/:id", authRequired, async (c) => {
     return c.json({ error: "Permission denied" }, 403);
   }
 
+  const creatorName = memo.creator_id === user.id ? user.username : (await c.env.DB.prepare("SELECT username FROM user WHERE id = ?").bind(memo.creator_id).first<{ username: string }>())?.username;
   await memoDB.deleteMemo(c.env.DB, memo.id);
+  await invalidateMemoDerivedCaches(c.env.CACHE, [creatorName]);
   return c.json({});
 });
 
@@ -548,6 +754,7 @@ memoRoutes.post("/:id/comments", authRequired, async (c) => {
     ).bind(user.id, parentMemo.creator_id, "UNREAD", message).run();
   }
 
+  await invalidateMemoDerivedCaches(c.env.CACHE, [user.username]);
   return c.json(await enrichMemo(c.env.DB, comment, user.username), 201);
 });
 
@@ -569,7 +776,7 @@ memoRoutes.get("/:id/comments", authOptional, async (c) => {
 
   const usernameMap = await resolveCreatorUsernames(c.env.DB, comments);
   return c.json({
-    memos: await Promise.all(comments.map((m) => enrichMemo(c.env.DB, m, usernameMap.get(m.creator_id)))),
+    memos: await enrichMemos(c.env.DB, comments, usernameMap),
     nextPageToken: "",
     totalSize: comments.length,
   });
@@ -708,25 +915,7 @@ memoRoutes.get("/-/linkMetadata", async (c) => {
   const url = c.req.query("url");
   if (!url) return c.json({ error: "URL required" }, 400);
 
-  try {
-    const resp = await fetch(url, {
-      headers: { "User-Agent": "cfmemos-bot/1.0" },
-      redirect: "follow",
-    });
-    const html = await resp.text();
-
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-    const imageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-
-    return c.json({
-      title: titleMatch?.[1]?.trim() || "",
-      description: descMatch?.[1]?.trim() || "",
-      image: imageMatch?.[1]?.trim() || "",
-    });
-  } catch {
-    return c.json({ title: "", description: "", image: "" });
-  }
+  return c.json(await getLinkMetadata(c.env, url));
 });
 
 memoRoutes.post("/-/linkMetadata\\:batchGet", async (c) => {
@@ -734,28 +923,7 @@ memoRoutes.post("/-/linkMetadata\\:batchGet", async (c) => {
   const urls = body.urls || [];
 
   const linkMetadata = await Promise.all(
-    urls.map(async (url) => {
-      try {
-        const resp = await fetch(url, {
-          headers: { "User-Agent": "cfmemos-bot/1.0" },
-          redirect: "follow",
-        });
-        const html = await resp.text();
-
-        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
-        const imageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
-
-        return {
-          url,
-          title: titleMatch?.[1]?.trim() || "",
-          description: descMatch?.[1]?.trim() || "",
-          image: imageMatch?.[1]?.trim() || "",
-        };
-      } catch {
-        return { url, title: "", description: "", image: "" };
-      }
-    }),
+    urls.map((url) => getLinkMetadata(c.env, url, true)),
   );
 
   return c.json({ linkMetadata });

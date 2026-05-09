@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
+  CACHE?: KVNamespace;
   AI: Ai;
   JWT_SECRET: string;
   INSTANCE_NAME: string;

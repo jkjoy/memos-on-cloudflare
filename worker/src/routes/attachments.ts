@@ -3,6 +3,7 @@ import type { Env, UserPayload } from "../types";
 import { authRequired } from "../middleware/auth";
 import * as settingDB from "../db/setting";
 import { createErrorBody } from "../error";
+import { deleteCachedKeys } from "../cache";
 
 type AttApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -156,6 +157,7 @@ attachmentRoutes.post("/", authRequired, async (c) => {
     .bind(uid, user.id, createdTs, createdTs, filename, fileType, fileData.byteLength, memoId, r2Key)
     .first<AttachmentRow>();
 
+  await deleteCachedKeys(c.env.CACHE, ["instance:stats"]);
   return c.json(formatAttachment(att!), 201);
 });
 
@@ -249,6 +251,7 @@ attachmentRoutes.delete("/:id", authRequired, async (c) => {
   }
 
   await c.env.DB.prepare("DELETE FROM attachment WHERE id = ?").bind(att.id).run();
+  await deleteCachedKeys(c.env.CACHE, ["instance:stats"]);
   return c.json({});
 });
 
@@ -268,5 +271,6 @@ attachmentRoutes.post("/:action", authRequired, async (c) => {
     }
   }
 
+  await deleteCachedKeys(c.env.CACHE, ["instance:stats"]);
   return c.json({});
 });

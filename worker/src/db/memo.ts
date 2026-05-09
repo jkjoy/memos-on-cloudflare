@@ -129,14 +129,19 @@ export async function listMemos(
 
   let orderClause = "ORDER BY pinned DESC, created_ts DESC";
   if (opts.orderBy) {
+    const allowedOrderColumns = new Set(["id", "created_ts", "updated_ts", "pinned"]);
     const parts = opts.orderBy.split(",").map((p) => p.trim());
     const orderParts: string[] = [];
     for (const part of parts) {
       const [field, dir] = part.split(" ");
       const col = field === "create_time" ? "created_ts" : field === "update_time" ? "updated_ts" : field;
-      orderParts.push(`${col} ${dir?.toUpperCase() === "ASC" ? "ASC" : "DESC"}`);
+      if (allowedOrderColumns.has(col)) {
+        orderParts.push(`${col} ${dir?.toUpperCase() === "ASC" ? "ASC" : "DESC"}`);
+      }
     }
-    orderClause = `ORDER BY ${orderParts.join(", ")}`;
+    if (orderParts.length > 0) {
+      orderClause = `ORDER BY ${orderParts.join(", ")}`;
+    }
   }
 
   const pageSize = opts.pageSize || 50;

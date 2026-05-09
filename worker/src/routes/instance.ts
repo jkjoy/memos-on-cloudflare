@@ -4,6 +4,7 @@ import { authRequired } from "../middleware/auth";
 import * as settingDB from "../db/setting";
 import * as userDB from "../db/user";
 import { getAppVersion } from "../version";
+import { deleteCachedKeys, getCachedJson, putCachedJson } from "../cache";
 
 type InstApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -11,6 +12,11 @@ export const instanceRoutes = new Hono<InstApp>();
 
 // Get instance profile
 instanceRoutes.get("/profile", async (c) => {
+  const cached = await getCachedJson(c.env.CACHE, "instance:profile");
+  if (cached) {
+    return c.json(cached);
+  }
+
   const userCount = await userDB.countUsers(c.env.DB);
   const generalSetting = await settingDB.getInstanceSetting(c.env.DB, "GENERAL");
   let profile = {};
@@ -46,34 +52,55 @@ instanceRoutes.get("/profile", async (c) => {
     }
   }
 
-  return c.json({
+  const response = {
     version: getAppVersion(c.env),
     mode: "prod",
     admin,
     ...profile,
-  });
+  };
+
+  await putCachedJson(c.env.CACHE, "instance:profile", response, 600);
+  return c.json(response);
 });
 
 // List instance settings
 instanceRoutes.get("/settings", async (c) => {
+  const cached = await getCachedJson(c.env.CACHE, "instance:settings");
+  if (cached) {
+    return c.json(cached);
+  }
+
   const settings = await settingDB.listSystemSettings(c.env.DB);
-  return c.json({
+  const response = {
     settings: settings.map((setting) => ({
       ...setting,
       name: settingDB.normalizeInstanceSettingName(setting.name),
     })),
-  });
+  };
+
+  await putCachedJson(c.env.CACHE, "instance:settings", response, 300);
+  return c.json(response);
 });
 
 // Get instance setting
 instanceRoutes.get("/settings/*", async (c) => {
   const fullPath = c.req.path;
   const name = settingDB.normalizeInstanceSettingName(fullPath.replace("/api/v1/instance/settings/", ""));
+  const cacheKey = `instance:setting:${name}`;
+  const cached = await getCachedJson(c.env.CACHE, cacheKey);
+  if (cached) {
+    return c.json(cached);
+  }
+
   const setting = await settingDB.getInstanceSetting(c.env.DB, name);
   if (!setting) {
-    return c.json({ name, value: "{}" });
+    const response = { name, value: "{}" };
+    await putCachedJson(c.env.CACHE, cacheKey, response, 300);
+    return c.json(response);
   }
-  return c.json({ name: setting.name, value: setting.value });
+  const response = { name: setting.name, value: setting.value };
+  await putCachedJson(c.env.CACHE, cacheKey, response, 300);
+  return c.json(response);
 });
 
 // Test email setting via Resend (admin only)
@@ -144,6 +171,11 @@ instanceRoutes.patch("/settings/*", authRequired, async (c) => {
   const name = settingDB.normalizeInstanceSettingName(fullPath.replace("/api/v1/instance/settings/", ""));
   const body = await c.req.json<{ value: string; description?: string }>();
   await settingDB.setSystemSetting(c.env.DB, name, body.value, body.description);
+  await deleteCachedKeys(c.env.CACHE, [
+    "instance:profile",
+    "instance:settings",
+    `instance:setting:${name}`,
+  ]);
   return c.json({ name, value: body.value });
 });
 
@@ -153,23 +185,13 @@ instanceRoutes.get("/stats", authRequired, async (c) => {
     return c.json({ error: "Admin only" }, 403);
   }
 
-  const pageSize = 1000;
-  let offset = 0;
-  let localStorageBytes = 0;
-
-  while (true) {
-    const { results } = await c.env.DB.prepare("SELECT size FROM attachment LIMIT ? OFFSET ?").bind(pageSize, offset).all<{ size: number }>();
-    if (!results.length) {
-      break;
-    }
-    for (const row of results) {
-      localStorageBytes += row.size || 0;
-    }
-    if (results.length < pageSize) {
-      break;
-    }
-    offset += pageSize;
+  const cached = await getCachedJson(c.env.CACHE, "instance:stats");
+  if (cached) {
+    return c.json(cached);
   }
+
+  const storageRow = await c.env.DB.prepare("SELECT COALESCE(SUM(size), 0) AS total FROM attachment").first<{ total: number }>();
+  const localStorageBytes = storageRow?.total ?? 0;
 
   let databaseSize = -1;
   try {
@@ -184,7 +206,7 @@ instanceRoutes.get("/stats", authRequired, async (c) => {
     databaseSize = -1;
   }
 
-  return c.json({
+  const response = {
     database: {
       driver: "cloudflare-d1",
       sizeBytes: databaseSize,
@@ -194,5 +216,8 @@ instanceRoutes.get("/stats", authRequired, async (c) => {
       seconds: Math.floor(Date.now() / 1000),
       nanos: 0,
     },
-  });
+  };
+
+  await putCachedJson(c.env.CACHE, "instance:stats", response, 60);
+  return c.json(response);
 });

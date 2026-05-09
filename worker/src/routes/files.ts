@@ -15,6 +15,44 @@ const UNSAFE_MIME_TYPES = new Set([
   "application/xhtml+xml",
 ]);
 
+function parseRangeHeader(rangeHeader: string | undefined, totalSize: number) {
+  if (!rangeHeader || totalSize <= 0) {
+    return undefined;
+  }
+
+  const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const [, rawStart, rawEnd] = match;
+  if (!rawStart && !rawEnd) {
+    return undefined;
+  }
+
+  let start: number;
+  let end: number;
+
+  if (!rawStart) {
+    const suffixLength = Number(rawEnd);
+    if (!Number.isFinite(suffixLength) || suffixLength <= 0) {
+      return undefined;
+    }
+    start = Math.max(totalSize - suffixLength, 0);
+    end = totalSize - 1;
+  } else {
+    start = Number(rawStart);
+    end = rawEnd ? Number(rawEnd) : totalSize - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || start >= totalSize) {
+    return undefined;
+  }
+
+  end = Math.min(end, totalSize - 1);
+  return { start, end, length: end - start + 1 };
+}
+
 const resolveUserFromRequest = async (c: { req: { header: (name: string) => string | undefined }; env: Env; get: (key: "user") => UserPayload | undefined }) => {
   const existingUser = c.get("user");
   if (existingUser) {
@@ -46,9 +84,11 @@ fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
 
   const att = await c.env.DB.prepare(
     "SELECT * FROM attachment WHERE uid = ?"
-  ).bind(uid).first<{ id: number; creator_id: number; type: string; reference: string; memo_id: number | null; filename: string }>();
+  ).bind(uid).first<{ id: number; creator_id: number; type: string; size: number; reference: string; memo_id: number | null; filename: string }>();
 
   if (!att) return c.notFound();
+
+  let cacheControl = "private, no-store";
 
   // Check visibility via memo
   if (att.memo_id) {
@@ -64,11 +104,21 @@ fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
       if (memo.visibility === "PROTECTED" && !user) {
         return c.json({ error: "Authentication required" }, 401);
       }
+      if (memo.visibility === "PUBLIC") {
+        cacheControl = "public, max-age=31536000, immutable";
+      } else if (user?.id === memo.creator_id) {
+        cacheControl = "private, max-age=300";
+      }
     }
   }
 
-  const r2Object = await c.env.BUCKET.get(att.reference);
-  if (!r2Object) return c.notFound();
+  const range = parseRangeHeader(c.req.header("Range"), att.size);
+  const r2Object = range
+    ? await c.env.BUCKET.get(att.reference, { range: { offset: range.start, length: range.length } })
+    : await c.env.BUCKET.get(att.reference);
+  if (!r2Object) {
+    return c.notFound();
+  }
 
   let contentType = att.type || "application/octet-stream";
   if (UNSAFE_MIME_TYPES.has(contentType)) {
@@ -77,24 +127,14 @@ fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
 
   const headers: Record<string, string> = {
     "Content-Type": contentType,
-    "Cache-Control": "public, max-age=31536000, immutable",
+    "Cache-Control": cacheControl,
+    "Accept-Ranges": "bytes",
   };
 
-  // Handle range requests
-  const rangeHeader = c.req.header("Range");
-  if (rangeHeader && r2Object.size) {
-    const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-    if (match) {
-      const start = Number(match[1]);
-      const end = match[2] ? Number(match[2]) : r2Object.size - 1;
-      const body = r2Object.body;
-
-      headers["Content-Range"] = `bytes ${start}-${end}/${r2Object.size}`;
-      headers["Content-Length"] = String(end - start + 1);
-      headers["Accept-Ranges"] = "bytes";
-
-      return new Response(body, { status: 206, headers });
-    }
+  if (range) {
+    headers["Content-Range"] = `bytes ${range.start}-${range.end}/${att.size}`;
+    headers["Content-Length"] = String(range.length);
+    return new Response(r2Object.body, { status: 206, headers });
   }
 
   if (r2Object.size) {

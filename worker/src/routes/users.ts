@@ -10,6 +10,7 @@ import { generatePAT, hashPAT } from "../auth/pat";
 import { exchangeOAuthCode } from "../auth/oauth";
 import { createErrorBody } from "../error";
 import { buildIdentityProviderName, extractIdentityProviderUid } from "../idp";
+import { deleteCachedKeys, getCachedJson, putCachedJson } from "../cache";
 
 type UserApp = { Bindings: Env; Variables: { user: UserPayload } };
 
@@ -84,6 +85,12 @@ userRoutes.post("/:batchGet", async (c) => {
 // Get user stats
 userRoutes.get("/:username/stats", authOptional, async (c) => {
   const username = c.req.param("username");
+  const cacheKey = `user:stats:${username}`;
+  const cached = await getCachedJson(c.env.CACHE, cacheKey);
+  if (cached) {
+    return c.json(cached);
+  }
+
   const user = await userDB.findUserByUsername(c.env.DB, username);
   if (!user) return c.json({ error: "User not found" }, 404);
 
@@ -109,20 +116,28 @@ userRoutes.get("/:username/stats", authOptional, async (c) => {
     if (m.pinned) pinnedMemos.push(m.created_ts);
   }
 
-  return c.json({
+  const response = {
     name: `users/${username}/stats`,
     memoCount: memos.length,
     tagCount: tagCounts,
     memoTypeStats: { linkCount, codeCount, todoCount, undoCount },
     pinnedMemos,
     memoDisplayTimestamps: memos.map((m) => m.created_ts),
-  });
+  };
+
+  await putCachedJson(c.env.CACHE, cacheKey, response, 60);
+  return c.json(response);
 });
 
 // Get all user stats
 userRoutes.get("/:action", async (c) => {
   const action = c.req.param("action");
   if (action === "stats") {
+    const cached = await getCachedJson(c.env.CACHE, "user:stats:all");
+    if (cached) {
+      return c.json(cached);
+    }
+
     const users = await userDB.listUsers(c.env.DB);
     const stats = [];
     for (const user of users) {
@@ -147,7 +162,9 @@ userRoutes.get("/:action", async (c) => {
         tagCount,
       });
     }
-    return c.json({ stats });
+    const response = { stats };
+    await putCachedJson(c.env.CACHE, "user:stats:all", response, 60);
+    return c.json(response);
   }
 
   // Get user by username (or numeric ID as fallback)
@@ -177,6 +194,7 @@ userRoutes.post("/", async (c) => {
 
     const passwordHash = await hashPassword(password);
     const user = await userDB.createUser(c.env.DB, { username, passwordHash, role: "ADMIN" });
+    await deleteCachedKeys(c.env.CACHE, ["instance:profile", "user:stats:all"]);
     return c.json(formatUser(user), 201);
   }
 
@@ -218,6 +236,7 @@ userRoutes.post("/", async (c) => {
   const role = isAdmin && userData.role === 2 ? "ADMIN" : "USER";
   const passwordHash = await hashPassword(password);
   const user = await userDB.createUser(c.env.DB, { username, passwordHash, role });
+  await deleteCachedKeys(c.env.CACHE, ["instance:profile", "user:stats:all"]);
 
   return c.json(formatUser(user), 201);
 });
@@ -266,6 +285,12 @@ userRoutes.patch("/:username", authRequired, async (c) => {
 
   const updated = await userDB.updateUser(c.env.DB, user.id, updateData);
   if (!updated) return c.json({ error: "Update failed" }, 500);
+  await deleteCachedKeys(c.env.CACHE, [
+    "instance:profile",
+    "user:stats:all",
+    `user:stats:${user.username}`,
+    `user:stats:${updated.username}`,
+  ]);
 
   return c.json(formatUser(updated));
 });
@@ -283,6 +308,7 @@ userRoutes.delete("/:username", authRequired, async (c) => {
   if (!user) return c.json({ error: "User not found" }, 404);
 
   await userDB.deleteUser(c.env.DB, user.id);
+  await deleteCachedKeys(c.env.CACHE, ["instance:profile", "user:stats:all", `user:stats:${user.username}`]);
   return c.json({});
 });
 
