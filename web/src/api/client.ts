@@ -1,9 +1,16 @@
-import { getAccessToken, hasStoredToken, isTokenExpired, setAccessToken, REQUEST_TOKEN_EXPIRY_BUFFER_MS } from "../auth-state";
+import { getAccessToken, isTokenExpired, REQUEST_TOKEN_EXPIRY_BUFFER_MS, setAccessToken, shouldAttemptTokenRefresh } from "../auth-state";
 import i18n from "../i18n";
 import { redirectOnAuthFailure } from "../utils/auth-redirect";
 
 let isRefreshing = false;
 let refreshPromise: Promise<void> | null = null;
+
+interface ApiRequestError extends Error {
+  serverMessage?: string;
+  errorKey?: string;
+  errorParams?: Record<string, unknown>;
+  code?: number;
+}
 
 async function doRefresh(): Promise<void> {
   const resp = await fetch("/api/v1/auth/refresh", {
@@ -38,7 +45,7 @@ export async function refreshAccessToken(): Promise<void> {
 async function getRequestToken(): Promise<string | null> {
   let token = getAccessToken();
   if (!token) {
-    if (!hasStoredToken()) return null;
+    if (!shouldAttemptTokenRefresh()) return null;
     try {
       await refreshAccessToken();
       token = getAccessToken();
@@ -58,12 +65,7 @@ async function getRequestToken(): Promise<string | null> {
   return token;
 }
 
-export async function apiRequest<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  options?: { isFormData?: boolean }
-): Promise<T> {
+export async function apiRequest<T>(method: string, path: string, body?: unknown, options?: { isFormData?: boolean }): Promise<T> {
   const token = await getRequestToken();
   const headers: Record<string, string> = {};
 
@@ -109,15 +111,15 @@ export async function apiRequest<T>(
 
   if (!resp.ok) {
     const errorData = await resp.json().catch(() => ({ error: resp.statusText }));
+    const errorParams =
+      errorData.errorParams && typeof errorData.errorParams === "object" ? (errorData.errorParams as Record<string, unknown>) : undefined;
     const translatedMessage =
-      errorData.errorKey && typeof errorData.errorKey === "string"
-        ? i18n.t(errorData.errorKey, (errorData.errorParams as Record<string, unknown>) || {})
-        : undefined;
-    const err = new Error(translatedMessage || errorData.error || `HTTP ${resp.status}`);
-    (err as any).serverMessage = errorData.error || `HTTP ${resp.status}`;
-    (err as any).errorKey = errorData.errorKey;
-    (err as any).errorParams = errorData.errorParams;
-    (err as any).code = resp.status === 401 ? 16 : resp.status === 403 ? 7 : resp.status === 404 ? 5 : 2;
+      errorData.errorKey && typeof errorData.errorKey === "string" ? i18n.t(errorData.errorKey, errorParams || {}) : undefined;
+    const err = new Error(translatedMessage || errorData.error || `HTTP ${resp.status}`) as ApiRequestError;
+    err.serverMessage = errorData.error || `HTTP ${resp.status}`;
+    err.errorKey = typeof errorData.errorKey === "string" ? errorData.errorKey : undefined;
+    err.errorParams = errorParams;
+    err.code = resp.status === 401 ? 16 : resp.status === 403 ? 7 : resp.status === 404 ? 5 : 2;
     throw err;
   }
 

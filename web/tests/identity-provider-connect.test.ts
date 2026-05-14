@@ -4,8 +4,10 @@ const fetchMock = vi.fn();
 
 vi.mock("@/auth-state", () => ({
   REQUEST_TOKEN_EXPIRY_BUFFER_MS: 30_000,
+  clearAccessToken: vi.fn(),
   getAccessToken: vi.fn(() => null),
   hasStoredToken: vi.fn(() => false),
+  shouldAttemptTokenRefresh: vi.fn(() => false),
   isTokenExpired: vi.fn(() => false),
   setAccessToken: vi.fn(),
 }));

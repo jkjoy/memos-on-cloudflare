@@ -16,6 +16,33 @@ type AuthApp = { Bindings: Env; Variables: { user: UserPayload } };
 
 export const authRoutes = new Hono<AuthApp>();
 
+const REFRESH_COOKIE_NAME = "memos_refresh";
+const SESSION_HINT_COOKIE_NAME = "memos_session_hint";
+const SESSION_COOKIE_PATH = "/";
+const SESSION_COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
+const SESSION_COOKIE_OPTIONS = {
+  secure: true,
+  sameSite: "Lax" as const,
+  path: SESSION_COOKIE_PATH,
+};
+
+function setSessionCookies(c: any, refreshToken: string) {
+  setCookie(c, REFRESH_COOKIE_NAME, refreshToken, {
+    ...SESSION_COOKIE_OPTIONS,
+    httpOnly: true,
+    maxAge: SESSION_COOKIE_MAX_AGE,
+  });
+  setCookie(c, SESSION_HINT_COOKIE_NAME, "1", {
+    ...SESSION_COOKIE_OPTIONS,
+    maxAge: SESSION_COOKIE_MAX_AGE,
+  });
+}
+
+function clearSessionCookies(c: any) {
+  deleteCookie(c, REFRESH_COOKIE_NAME, { path: SESSION_COOKIE_PATH });
+  deleteCookie(c, SESSION_HINT_COOKIE_NAME, { path: SESSION_COOKIE_PATH });
+}
+
 const getGeneralSetting = async (db: D1Database) => {
   const setting = await settingDB.getInstanceSetting(db, "GENERAL");
   if (!setting) {
@@ -168,13 +195,7 @@ authRoutes.post("/signin", async (c) => {
   const tokenId = crypto.randomUUID();
   const { token: refreshToken } = await createRefreshToken(userPayload, tokenId, c.env.JWT_SECRET);
 
-  setCookie(c, "memos_refresh", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60,
-  });
+  setSessionCookies(c, refreshToken);
 
   const formattedUser = formatUser(user! as UserRow);
 
@@ -233,13 +254,7 @@ authRoutes.post("/signup", async (c) => {
   const tokenId = crypto.randomUUID();
   const { token: refreshToken } = await createRefreshToken(userPayload, tokenId, c.env.JWT_SECRET);
 
-  setCookie(c, "memos_refresh", refreshToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "Lax",
-    path: "/",
-    maxAge: 30 * 24 * 60 * 60,
-  });
+  setSessionCookies(c, refreshToken);
 
   const formattedUser = formatUser(user as UserRow);
 
@@ -254,13 +269,14 @@ authRoutes.post("/signup", async (c) => {
 });
 
 authRoutes.post("/signout", async (c) => {
-  deleteCookie(c, "memos_refresh", { path: "/" });
+  clearSessionCookies(c);
   return c.json({});
 });
 
 authRoutes.post("/refresh", async (c) => {
-  const refreshToken = getCookie(c, "memos_refresh");
+  const refreshToken = getCookie(c, REFRESH_COOKIE_NAME);
   if (!refreshToken) {
+    clearSessionCookies(c);
     return c.json({ error: "No refresh token" }, 401);
   }
 
@@ -268,6 +284,7 @@ authRoutes.post("/refresh", async (c) => {
     const claims = await verifyRefreshToken(refreshToken, c.env.JWT_SECRET);
     const user = await findUserById(c.env.DB, Number(claims.sub));
     if (!user || user.row_status !== "NORMAL") {
+      clearSessionCookies(c);
       return c.json({ error: "User not found or archived" }, 401);
     }
 
@@ -286,7 +303,7 @@ authRoutes.post("/refresh", async (c) => {
       accessTokenExpiresAt: toISODateTime(expiresAt),
     });
   } catch {
-    deleteCookie(c, "memos_refresh", { path: "/" });
+    clearSessionCookies(c);
     return c.json({ error: "Invalid refresh token" }, 401);
   }
 });

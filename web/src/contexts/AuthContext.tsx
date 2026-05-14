@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
-import { clearAccessToken, getAccessToken } from "@/auth-state";
+import { clearAccessToken, getAccessToken, shouldAttemptTokenRefresh } from "@/auth-state";
 import { authServiceClient, refreshAccessToken, shortcutServiceClient, userServiceClient } from "@/connect";
 import { userKeys } from "@/hooks/useUserQueries";
 import type { Shortcut } from "@/types/proto/api/v1/shortcut_service_pb";
@@ -55,10 +55,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState((prev) => ({ ...prev, isLoading: true }));
 
     // Try to get or refresh the access token.
-    // This handles PWA isolated storage scenarios (e.g., iOS Safari) where localStorage
-    // may be empty but a valid HTTP-only refresh token cookie still exists.
-    // getAccessToken() returns a cached token or loads from localStorage if valid.
-    if (!getAccessToken()) {
+    // This handles isolated storage scenarios where localStorage is empty but the
+    // server-issued refresh/session cookies still exist.
+    if (!getAccessToken() && shouldAttemptTokenRefresh()) {
       try {
         await refreshAccessToken();
       } catch {

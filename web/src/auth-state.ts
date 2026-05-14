@@ -5,6 +5,7 @@ let tokenExpiresAt: Date | null = null;
 
 const TOKEN_KEY = "memos_access_token";
 const EXPIRES_KEY = "memos_token_expires_at";
+const SESSION_HINT_COOKIE = "memos_session_hint";
 
 // BroadcastChannel lets tabs share freshly-refreshed tokens so that only one
 // tab needs to hit the refresh endpoint. When another tab successfully refreshes
@@ -62,9 +63,9 @@ export const getAccessToken = (): string | null => {
           tokenExpiresAt = expiresAt;
         }
         // Do NOT remove expired tokens here. getRequestToken() in connect.ts calls
-        // hasStoredToken() to decide whether to attempt a refresh — if we eagerly delete
-        // the expired token, it returns null immediately, skipping the refresh and sending
-        // the request without credentials.
+        // shouldAttemptTokenRefresh() to decide whether to attempt a refresh — if we eagerly
+        // delete the expired token, it returns null immediately, skipping the refresh and
+        // sending the request without credentials.
         // clearAccessToken() handles proper cleanup after a confirmed auth failure or logout.
       }
     } catch (e) {
@@ -102,10 +103,9 @@ export const isTokenExpired = (bufferMs: number = REQUEST_TOKEN_EXPIRY_BUFFER_MS
   return new Date() >= new Date(tokenExpiresAt.getTime() - bufferMs);
 };
 
-// Returns true if a token exists in localStorage, even if it is expired.
-// Used to decide whether to attempt GetCurrentUser on app init — if no token
-// was ever stored, the user is definitively not logged in and there is nothing
-// to refresh, so we can skip the network round-trip entirely.
+// Returns true if an access token exists in memory or localStorage, even if the
+// persisted copy is expired. This remains one of the signals used to decide
+// whether a refresh attempt might succeed.
 export const hasStoredToken = (): boolean => {
   if (accessToken) return true;
   try {
@@ -114,6 +114,20 @@ export const hasStoredToken = (): boolean => {
     return false;
   }
 };
+
+export const hasRefreshSessionHint = (): boolean => {
+  if (typeof document === "undefined") return false;
+  try {
+    return document.cookie.split(";").some((cookie) => cookie.trim().startsWith(`${SESSION_HINT_COOKIE}=`));
+  } catch {
+    return false;
+  }
+};
+
+// Returns true when the browser has any signal that a refresh attempt might succeed:
+// a stored access token or the server-set session hint cookie that accompanies the
+// HttpOnly refresh cookie.
+export const shouldAttemptTokenRefresh = (): boolean => hasStoredToken() || hasRefreshSessionHint();
 
 export const clearAccessToken = (): void => {
   accessToken = null;
