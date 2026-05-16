@@ -15,7 +15,7 @@ APP_VERSION = "1.0.0"
 [[d1_databases]]
 binding = "DB"
 database_name = "cfmemos-db"
-database_id = "efb2f813-c777-494c-941a-cd34bc0e7d5b"
+database_id = "ba586a8e-86c8-42e5-b081-01f96bf5fc38"
 
 [[r2_buckets]]
 binding = "BUCKET"
