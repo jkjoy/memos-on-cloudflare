@@ -28,7 +28,7 @@ rssRoutes.get("/:username/rss.xml", async (c) => {
   const items = memos.map((memo) => {
     const title = memo.content.split("\n")[0]?.replace(/^#+\s*/, "").slice(0, 100) || "Untitled";
     const pubDate = new Date(memo.created_ts * 1000).toUTCString();
-    const link = `${baseUrl}/m/${memo.uid}`;
+    const link = `${baseUrl}/memos/${memo.uid}`;
     const content = escapeXml(memo.content);
 
     return `    <item>
