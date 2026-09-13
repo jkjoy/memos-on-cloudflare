@@ -52,7 +52,6 @@ export default defineConfig({
         manualChunks: {
           "router-vendor": ["react-router-dom"],
           "utils-vendor": ["dayjs", "lodash-es"],
-          "mermaid-vendor": ["mermaid"],
           "leaflet-vendor": ["leaflet", "react-leaflet"],
         },
       },

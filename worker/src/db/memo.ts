@@ -135,8 +135,6 @@ export async function listMemos(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const countQuery = `SELECT COUNT(*) as total FROM memo ${where}`;
-  const countResult = await db.prepare(countQuery).bind(...params).first<{ total: number }>();
-  const total = countResult?.total ?? 0;
 
   let orderClause = "ORDER BY pinned DESC, created_ts DESC";
   if (opts.orderBy) {
@@ -160,9 +158,12 @@ export async function listMemos(
 
   const dataQuery = `SELECT * FROM memo ${where} ${orderClause} LIMIT ? OFFSET ?`;
   const allParams = [...params, pageSize, offset];
-  const { results } = await db.prepare(dataQuery).bind(...allParams).all<MemoRow>();
+  const [countResult, dataResult] = await Promise.all([
+    db.prepare(countQuery).bind(...params).first<{ total: number }>(),
+    db.prepare(dataQuery).bind(...allParams).all<MemoRow>(),
+  ]);
 
-  return { memos: results, total };
+  return { memos: dataResult.results, total: countResult?.total ?? 0 };
 }
 
 export async function updateMemo(

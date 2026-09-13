@@ -4,9 +4,11 @@ import { countBy } from "lodash-es";
 import { useMemo } from "react";
 import type { MemoExplorerContext } from "@/components/MemoExplorer";
 import { type MemoTimeBasis, useView } from "@/contexts/ViewContext";
+import { buildMemoCreatorFilter } from "@/helpers/resource-names";
 import useCurrentUser from "@/hooks/useCurrentUser";
 import { useMemos } from "@/hooks/useMemoQueries";
 import { useUserStats } from "@/hooks/useUserQueries";
+import { State } from "@/types/proto/api/v1/common_pb";
 import type { Memo } from "@/types/proto/api/v1/memo_service_pb";
 import type { StatisticsData } from "@/types/statistics";
 
@@ -39,13 +41,20 @@ export const useFilteredMemoStats = (options: UseFilteredMemoStatsOptions = {}):
   // explore: fetch memos with visibility filter to exclude private content.
   // ListMemos AND's the request filter with the server's auth filter, so private
   // memos are always excluded regardless of backend version.
-  // other contexts: fetch with default params for the fallback memo-based path.
+  // archived: use an archived, current-user-scoped list until a dedicated archived
+  // stats endpoint is available. Home/profile use user stats and do not need a list.
   const exploreVisibilityFilter = currentUser != null ? 'visibility in ["PUBLIC", "PROTECTED"]' : 'visibility in ["PUBLIC"]';
-  const memoQueryParams = context === "explore" ? { filter: exploreVisibilityFilter, pageSize: 1000 } : {};
-  const { data: memosResponse, isLoading: isLoadingMemos } = useMemos(memoQueryParams);
+  const memoQueryParams =
+    context === "explore"
+      ? { filter: exploreVisibilityFilter, pageSize: 1000 }
+      : context === "archived"
+        ? { state: State.ARCHIVED, filter: buildMemoCreatorFilter(currentUser?.name ?? "") }
+        : {};
+  const memoStatsEnabled = context === "explore" || (context === "archived" && !!currentUser?.name) || (!context && !userName);
+  const { data: memosResponse, isLoading: isLoadingMemos } = useMemos(memoQueryParams, { enabled: memoStatsEnabled });
 
   const data = useMemo(() => {
-    const loading = isLoadingUserStats || isLoadingMemos;
+    const loading = isLoadingUserStats || (memoStatsEnabled && isLoadingMemos);
     let activityStats: Record<string, number> = {};
     let tagCount: Record<string, number> = {};
 
@@ -104,7 +113,7 @@ export const useFilteredMemoStats = (options: UseFilteredMemoStatsOptions = {}):
     }
 
     return { statistics: { activityStats, timeBasis }, tags: tagCount, loading };
-  }, [context, userName, userStats, memosResponse, isLoadingUserStats, isLoadingMemos, timeBasis]);
+  }, [context, userName, userStats, memosResponse, isLoadingUserStats, isLoadingMemos, memoStatsEnabled, timeBasis]);
 
   return data;
 };

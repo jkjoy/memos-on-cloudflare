@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import { createBrowserRouter, type RouteObject } from "react-router-dom";
+import { getAccessToken } from "@/auth-state";
 import App from "@/App";
 import { ChunkLoadErrorFallback } from "@/components/ErrorBoundary";
 import MainLayout from "@/layouts/MainLayout";
@@ -24,20 +25,56 @@ function lazyWithReload<T extends React.ComponentType>(factory: () => Promise<{ 
   );
 }
 
-const AdminSignIn = lazyWithReload(() => import("@/pages/AdminSignIn"));
-const Archived = lazyWithReload(() => import("@/pages/Archived"));
-const AuthCallback = lazyWithReload(() => import("@/pages/AuthCallback"));
-const Explore = lazyWithReload(() => import("@/pages/Explore"));
-const Home = lazyWithReload(() => import("@/pages/Home"));
-const Inboxes = lazyWithReload(() => import("@/pages/Inboxes"));
-const MemoDetail = lazyWithReload(() => import("@/pages/MemoDetail"));
-const NotFound = lazyWithReload(() => import("@/pages/NotFound"));
-const PermissionDenied = lazyWithReload(() => import("@/pages/PermissionDenied"));
-const Attachments = lazyWithReload(() => import("@/pages/Attachments"));
-const Setting = lazyWithReload(() => import("@/pages/Setting"));
-const SignIn = lazyWithReload(() => import("@/pages/SignIn"));
-const SignUp = lazyWithReload(() => import("@/pages/SignUp"));
-const UserProfile = lazyWithReload(() => import("@/pages/UserProfile"));
+const routeLoaders = {
+  adminSignIn: () => import("@/pages/AdminSignIn"),
+  archived: () => import("@/pages/Archived"),
+  authCallback: () => import("@/pages/AuthCallback"),
+  explore: () => import("@/pages/Explore"),
+  home: () => import("@/pages/Home"),
+  inboxes: () => import("@/pages/Inboxes"),
+  memoDetail: () => import("@/pages/MemoDetail"),
+  notFound: () => import("@/pages/NotFound"),
+  permissionDenied: () => import("@/pages/PermissionDenied"),
+  attachments: () => import("@/pages/Attachments"),
+  setting: () => import("@/pages/Setting"),
+  signIn: () => import("@/pages/SignIn"),
+  signUp: () => import("@/pages/SignUp"),
+  userProfile: () => import("@/pages/UserProfile"),
+};
+
+const AdminSignIn = lazyWithReload(routeLoaders.adminSignIn);
+const Archived = lazyWithReload(routeLoaders.archived);
+const AuthCallback = lazyWithReload(routeLoaders.authCallback);
+const Explore = lazyWithReload(routeLoaders.explore);
+const Home = lazyWithReload(routeLoaders.home);
+const Inboxes = lazyWithReload(routeLoaders.inboxes);
+const MemoDetail = lazyWithReload(routeLoaders.memoDetail);
+const NotFound = lazyWithReload(routeLoaders.notFound);
+const PermissionDenied = lazyWithReload(routeLoaders.permissionDenied);
+const Attachments = lazyWithReload(routeLoaders.attachments);
+const Setting = lazyWithReload(routeLoaders.setting);
+const SignIn = lazyWithReload(routeLoaders.signIn);
+const SignUp = lazyWithReload(routeLoaders.signUp);
+const UserProfile = lazyWithReload(routeLoaders.userProfile);
+
+export function preloadInitialRoute() {
+  if (typeof window === "undefined") return;
+
+  const { pathname } = window.location;
+  const loader =
+    pathname === Routes.HOME
+      ? getAccessToken()
+        ? routeLoaders.home
+        : undefined
+      : pathname === Routes.EXPLORE
+        ? routeLoaders.explore
+        : pathname === Routes.ARCHIVED
+          ? routeLoaders.archived
+          : undefined;
+  if (loader) {
+    void loader();
+  }
+}
 
 // Backward compatibility alias.
 export const Routes = ROUTES;

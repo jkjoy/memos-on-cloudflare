@@ -99,14 +99,6 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
     );
   }, [defaultCreateTime, memo, isInitialized, actions, dispatch]);
 
-  useEffect(() => {
-    if (!currentUser) {
-      return;
-    }
-
-    void fetchSetting(InstanceSetting_Key.AI).catch(() => undefined);
-  }, [currentUser, fetchSetting]);
-
   const insertTranscribedText = useCallback((text: string) => {
     const editor = editorRef.current;
     if (!editor) {
@@ -210,6 +202,9 @@ const MemoEditorImpl: React.FC<MemoEditorProps> = ({
       return;
     }
 
+    // AI is only needed for optional transcription. Load it after the user
+    // explicitly opens the recorder so it does not delay the initial feed.
+    void fetchSetting(InstanceSetting_Key.AI).catch(() => undefined);
     void handleStartAudioRecording();
   };
 

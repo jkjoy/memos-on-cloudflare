@@ -108,13 +108,14 @@ function patchMemoInCollectionQueries(queryClient: ReturnType<typeof useQueryCli
   queryClient.setQueriesData<MemoCollectionQueryData>({ queryKey: memoKeys.all }, (data) => patchMemoListQueryData(data, update));
 }
 
-export function useMemos(request: Partial<ListMemosRequest> = {}) {
+export function useMemos(request: Partial<ListMemosRequest> = {}, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: memoKeys.list(request),
     queryFn: async () => {
       const response = await memoServiceClient.listMemos(create(ListMemosRequestSchema, request as Record<string, unknown>));
       return response;
     },
+    enabled: options?.enabled ?? true,
   });
 }
 

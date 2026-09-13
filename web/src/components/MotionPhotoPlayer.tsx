@@ -108,7 +108,7 @@ const MotionPhotoPlayer = ({
         )}
         muted
         playsInline
-        preload="metadata"
+        preload="none"
         disableRemotePlayback
         onLoadedMetadata={(event) => resetPlaybackPosition(event.currentTarget)}
         onEnded={() => stopPlayback()}

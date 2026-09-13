@@ -25,7 +25,7 @@ const MemoView: React.FC<MemoViewProps> = (props: MemoViewProps) => {
 
   const currentUser = useCurrentUser();
   const { tagsSetting } = useInstance();
-  const creator = useUser(memoData.creator).data;
+  const creator = useUser(memoData.creator, { enabled: Boolean(showCreator || props.shareImageDialogOpen) }).data;
   const isArchived = memoData.state === State.ARCHIVED;
   const readonly = memoData.creator !== currentUser?.name && !isSuperUser(currentUser);
   const parentPage = parentPageProp || "/";

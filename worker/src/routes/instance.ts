@@ -11,6 +11,7 @@ type InstApp = { Bindings: Env; Variables: { user: UserPayload } };
 export const instanceRoutes = new Hono<InstApp>();
 
 const PUBLIC_INSTANCE_SETTING_KEYS = new Set(["GENERAL", "MEMO_RELATED", "TAGS", "AI"]);
+const PUBLIC_INSTANCE_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=600";
 
 function getInstanceSettingKey(name: string): string {
   return settingDB.normalizeInstanceSettingName(name).split("/").pop() || "";
@@ -48,6 +49,7 @@ function sanitizePublicInstanceSettingValue(name: string, value: string): string
 
 // Get instance profile
 instanceRoutes.get("/profile", async (c) => {
+  c.header("Cache-Control", PUBLIC_INSTANCE_CACHE_CONTROL);
   const cached = await getCachedJson(c.env.CACHE, "instance:profile");
   if (cached) {
     return c.json(cached);
@@ -135,6 +137,10 @@ instanceRoutes.get("/settings/*", authOptional, async (c) => {
   }
 
   const cacheKey = key === "AI" ? `instance:setting:${name}:${isAdmin ? "admin" : "public"}` : `instance:setting:${name}`;
+  const isPublicResponse = PUBLIC_INSTANCE_SETTING_KEYS.has(key) && (key !== "AI" || !isAdmin);
+  if (isPublicResponse) {
+    c.header("Cache-Control", PUBLIC_INSTANCE_CACHE_CONTROL);
+  }
   const cached = await getCachedJson(c.env.CACHE, cacheKey);
   if (cached) {
     return c.json(cached);

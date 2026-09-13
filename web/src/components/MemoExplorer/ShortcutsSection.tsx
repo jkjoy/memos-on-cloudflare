@@ -1,5 +1,5 @@
 import { Edit3Icon, MoreVerticalIcon, PlusIcon, TrashIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import toast from "react-hot-toast";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -29,10 +29,6 @@ function ShortcutsSection() {
   const [isCreateShortcutDialogOpen, setIsCreateShortcutDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Shortcut | undefined>();
   const [editingShortcut, setEditingShortcut] = useState<Shortcut | undefined>();
-
-  useEffect(() => {
-    refetchSettings();
-  }, [refetchSettings]);
 
   const handleDeleteShortcut = async (shortcut: Shortcut) => {
     setDeleteTarget(shortcut);

@@ -10,5 +10,6 @@ export const TrustedIframe = (props: React.ComponentProps<"iframe">) => {
   return createElement("iframe", {
     ...props,
     className: cn("max-w-full rounded-lg border border-border", props.className),
+    loading: "lazy",
   });
 };

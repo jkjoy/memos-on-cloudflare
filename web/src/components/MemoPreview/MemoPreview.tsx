@@ -14,7 +14,6 @@ interface MemoPreviewProps {
   content: string;
   attachments: Attachment[];
   name?: string;
-  compact?: boolean;
   className?: string;
   creator?: User;
   showCreator?: boolean;
@@ -105,7 +104,6 @@ const MemoPreview = ({
   content,
   attachments,
   name,
-  compact = true,
   className,
   creator,
   showCreator = false,
@@ -128,7 +126,7 @@ const MemoPreview = ({
       <div className="text-sm text-muted-foreground truncate min-w-0">No content</div>
     )
   ) : (
-    hasContent && <MemoContent content={content} compact={compact} />
+    hasContent && <MemoContent content={content} />
   );
 
   return (

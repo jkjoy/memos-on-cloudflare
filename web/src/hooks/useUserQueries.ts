@@ -77,36 +77,39 @@ export function useNotifications() {
 
 export function useTagCounts(forCurrentUser = false) {
   const currentUser = useCurrentUser();
+  const currentUserStats = useUserStats(forCurrentUser ? currentUser?.name : undefined);
 
-  return useQuery({
-    queryKey: forCurrentUser ? [...userKeys.stats(), "tagCounts", "current"] : [...userKeys.stats(), "tagCounts", "all"],
+  const allUserStats = useQuery({
+    queryKey: [...userKeys.stats(), "tagCounts", "all"],
     queryFn: async () => {
-      if (forCurrentUser) {
-        // Fetch current user stats only
-        if (!currentUser?.name) {
-          return {};
-        }
-        const stats = await userServiceClient.getUserStats({ name: currentUser.name });
-        return stats.tagCount || {};
-      } else {
-        // Fetch all user stats
-        const { stats } = await userServiceClient.listAllUserStats({});
+      // Fetch all user stats
+      const { stats } = await userServiceClient.listAllUserStats({});
 
-        // Aggregate tag counts from all users
-        const tagCount: Record<string, number> = {};
-        for (const userStats of stats) {
-          if (userStats.tagCount) {
-            for (const [tag, count] of Object.entries(userStats.tagCount as Record<string, number>)) {
-              tagCount[tag] = (tagCount[tag] || 0) + count;
-            }
+      // Aggregate tag counts from all users
+      const tagCount: Record<string, number> = {};
+      for (const userStats of stats) {
+        if (userStats.tagCount) {
+          for (const [tag, count] of Object.entries(userStats.tagCount as Record<string, number>)) {
+            tagCount[tag] = (tagCount[tag] || 0) + count;
           }
         }
-        return tagCount;
       }
+      return tagCount;
     },
-    enabled: !forCurrentUser || !!currentUser?.name,
+    enabled: !forCurrentUser,
     staleTime: 1000 * 60 * 2, // 2 minutes - tags don't change frequently
   });
+
+  // The explorer already fetches the current user's complete stats. Reuse that
+  // query for editor tag suggestions instead of issuing a second /stats request.
+  if (forCurrentUser) {
+    return {
+      ...currentUserStats,
+      data: currentUserStats.data?.tagCount || {},
+    };
+  }
+
+  return allUserStats;
 }
 
 export function useUpdateUser() {

@@ -115,7 +115,7 @@ const CollageVisualItem = ({
     <VisualTile className={cn("block h-full w-full", className)} onPreview={onPreview} overlayLabel={overlayLabel}>
       {item.kind === "video" ? (
         <>
-          <video src={item.sourceUrl} className={COVER_MEDIA_CLASS} preload="metadata" />
+          <video src={item.sourceUrl} className={COVER_MEDIA_CLASS} preload="none" />
           {!overlayLabel && (
             <VideoPlayBadge className={COLLAGE_VIDEO_PLAY_BADGE_CLASS}>
               <PlayIcon className="h-3.5 w-3.5 fill-current" />
@@ -170,7 +170,7 @@ const SingleVisualItem = ({ item, onPreview }: { item: VisualItem; onPreview?: (
   return (
     <VisualTile className={cn("block", SINGLE_VIDEO_CARD_WIDTH_CLASS)} onPreview={onPreview}>
       <div className="relative aspect-video bg-black/5">
-        <video src={item.sourceUrl} poster={item.posterUrl} className={COVER_MEDIA_CLASS} preload="metadata" />
+        <video src={item.sourceUrl} poster={item.posterUrl} className={COVER_MEDIA_CLASS} preload="none" />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-black/5 to-transparent" />
         <VideoPlayBadge className="bottom-3 right-3 h-9 w-9">
           <PlayIcon className="h-4 w-4 fill-current" />

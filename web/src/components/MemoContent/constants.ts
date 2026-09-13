@@ -4,19 +4,6 @@ import { defaultSchema } from "rehype-sanitize";
 export const TASK_LIST_CLASS = "contains-task-list";
 export const TASK_LIST_ITEM_CLASS = "task-list-item";
 
-// Compact mode display settings
-export const COMPACT_MODE_CONFIG = {
-  maxHeightVh: 60, // 60% of viewport height
-  gradientHeight: "h-24", // Tailwind class for gradient overlay
-} as const;
-
-export const getMaxDisplayHeight = () => window.innerHeight * (COMPACT_MODE_CONFIG.maxHeightVh / 100);
-
-export const COMPACT_STATES: Record<"ALL" | "SNIPPET", { textKey: string; next: "ALL" | "SNIPPET" }> = {
-  ALL: { textKey: "memo.show-more", next: "SNIPPET" },
-  SNIPPET: { textKey: "memo.show-less", next: "ALL" },
-};
-
 const TRUSTED_IFRAME_SRC_PATTERNS = [
   /^https:\/\/www\.youtube\.com\/embed\/[^?#]+(?:\?.*)?$/i,
   /^https:\/\/www\.youtube-nocookie\.com\/embed\/[^?#]+(?:\?.*)?$/i,

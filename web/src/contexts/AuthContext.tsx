@@ -95,11 +95,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const settings = await fetchUserSettings(currentUser.name);
-
       setState({
         currentUser,
-        ...settings,
+        userGeneralSetting: undefined,
+        userWebhooksSetting: undefined,
+        shortcuts: [],
         isInitialized: true,
         isLoading: false,
       });
@@ -107,6 +107,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Pre-populate React Query cache
       queryClient.setQueryData(userKeys.currentUser(), currentUser);
       queryClient.setQueryData(userKeys.detail(currentUser.name), currentUser);
+
+      // User settings are not required to render the memo list. Load them in the
+      // background so authenticated routes can mount as soon as the user is known.
+      void fetchUserSettings(currentUser.name)
+        .then((settings) => {
+          setState((prev) => (prev.currentUser?.name === currentUser.name ? { ...prev, ...settings } : prev));
+        })
+        .catch((error) => {
+          console.error("Failed to load user settings:", error);
+        });
     } catch (error) {
       console.error("Failed to initialize auth:", error);
       clearAccessToken();

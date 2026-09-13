@@ -399,7 +399,10 @@ async function enrichMemos(db: D1Database, memos: memoDB.MemoRow[], creatorUsern
   }
 
   const relationMemoIds = relationRows.flatMap((relation) => [relation.memo_id, relation.related_memo_id]);
-  const relationMemoMap = await getMemoSnippetMapByIds(db, relationMemoIds);
+  const [relationMemoMap, reactionUsernameMap] = await Promise.all([
+    getMemoSnippetMapByIds(db, relationMemoIds),
+    resolveUsernamesByIds(db, reactionRows.map((r) => r.creator_id)),
+  ]);
 
   const relationsByMemoId = new Map<number, any[]>();
   for (const relation of relationRows) {
@@ -426,7 +429,6 @@ async function enrichMemos(db: D1Database, memos: memoDB.MemoRow[], creatorUsern
     }
   }
 
-  const reactionUsernameMap = await resolveUsernamesByIds(db, reactionRows.map((r) => r.creator_id));
   const reactionsByContentId = new Map<string, ReturnType<typeof formatReaction>[]>();
   for (const reaction of reactionRows) {
     const reactions = reactionsByContentId.get(reaction.content_id) || [];

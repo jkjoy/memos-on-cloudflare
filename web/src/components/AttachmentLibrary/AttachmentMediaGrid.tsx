@@ -19,7 +19,7 @@ const AttachmentMediaCard = ({ item, onPreview }: { item: AttachmentLibraryMedia
         <div className="relative aspect-[5/4] overflow-hidden bg-muted/40">
           {item.kind === "video" ? (
             <>
-              <video src={item.sourceUrl} poster={item.posterUrl} className="h-full w-full object-cover" preload="metadata" />
+              <video src={item.sourceUrl} poster={item.posterUrl} className="h-full w-full object-cover" preload="none" />
               <div className="absolute inset-0 bg-linear-to-t from-black/35 via-black/5 to-transparent" />
               <span className="absolute bottom-2.5 right-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/85 text-foreground shadow-sm backdrop-blur-sm">
                 <PlayIcon className="h-3.5 w-3.5 fill-current" />
