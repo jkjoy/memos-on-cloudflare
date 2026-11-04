@@ -2,8 +2,13 @@
   "name": "cfmemos",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "wrangler dev",
+    "test": "tsx --test worker/tests/*.test.mjs",
     "dev:web": "cd web && npm run dev",
     "build:web": "cd web && npm run build",
     "deploy": "npm run build:web && wrangler deploy",
@@ -12,12 +17,13 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "hono": "^4.12.18",
+    "hono": "^4.13.16",
     "jose": "^6.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250501.0",
     "@types/bcryptjs": "^2.4.6",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0",
     "wrangler": "^4.14.0"
   }

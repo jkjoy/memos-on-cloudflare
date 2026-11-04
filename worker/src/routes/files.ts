@@ -3,18 +3,49 @@ import { getCookie } from "hono/cookie";
 import type { Env, UserPayload } from "../types";
 import { authOptional } from "../middleware/auth";
 import { verifyRefreshToken } from "../auth/jwt";
+import { findActiveUserPayload } from "../auth/user";
 import * as shareDB from "../db/share";
 
 type FileApp = { Bindings: Env; Variables: { user: UserPayload } };
 
 export const fileRoutes = new Hono<FileApp>();
 
-const UNSAFE_MIME_TYPES = new Set([
-  "text/html",
-  "text/xml",
-  "image/svg+xml",
-  "application/xhtml+xml",
+const INLINE_MIME_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+  "image/bmp",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+  "audio/aac",
+  "audio/flac",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/ogg",
+  "audio/wav",
+  "audio/webm",
+  "audio/x-m4a",
+  "audio/x-wav",
+  "video/mp4",
+  "video/mpeg",
+  "video/ogg",
+  "video/quicktime",
+  "video/webm",
+  "application/pdf",
+  "text/plain",
 ]);
+
+function getDownloadDisposition(filename: string): string {
+  // A fixed ASCII fallback and an encoded UTF-8 name keep stored filenames out
+  // of header syntax, including quotes, control characters and backslashes.
+  const wellFormedFilename = new TextDecoder().decode(new TextEncoder().encode(filename));
+  const encodedFilename = encodeURIComponent(wellFormedFilename).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+  return `attachment; filename="download"; filename*=UTF-8''${encodedFilename}`;
+}
 
 function parseRangeHeader(rangeHeader: string | undefined, totalSize: number) {
   if (!rangeHeader || totalSize <= 0) {
@@ -67,12 +98,7 @@ const resolveUserFromRequest = async (c: { req: { header: (name: string) => stri
 
   try {
     const claims = await verifyRefreshToken(refreshToken, c.env.JWT_SECRET);
-    return {
-      id: Number(claims.sub),
-      username: claims.name,
-      role: claims.role,
-      status: claims.status,
-    };
+    return await findActiveUserPayload(c.env.DB, claims.sub);
   } catch {
     return undefined;
   }
@@ -94,7 +120,6 @@ async function hasValidShareTokenForAttachment(db: D1Database, token: string | u
 // Serve attachment file
 fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
   const uid = c.req.param("uid");
-  const filename = c.req.param("filename");
 
   const att = await c.env.DB.prepare(
     "SELECT * FROM attachment WHERE uid = ?"
@@ -122,8 +147,6 @@ fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
         }
         if (memo.visibility === "PUBLIC") {
           cacheControl = "public, max-age=31536000, immutable";
-        } else if (user?.id === memo.creator_id) {
-          cacheControl = "private, max-age=300";
         }
       }
     } else {
@@ -147,16 +170,21 @@ fileRoutes.get("/attachments/:uid/:filename", authOptional, async (c) => {
     return c.notFound();
   }
 
-  let contentType = att.type || "application/octet-stream";
-  if (UNSAFE_MIME_TYPES.has(contentType)) {
-    contentType = "application/octet-stream";
-  }
+  const mediaType = (att.type || "").split(";", 1)[0].trim().toLowerCase();
+  const isInline = INLINE_MIME_TYPES.has(mediaType);
+  const contentType = isInline ? mediaType : "application/octet-stream";
 
   const headers: Record<string, string> = {
     "Content-Type": contentType,
     "Cache-Control": cacheControl,
     "Accept-Ranges": "bytes",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox; default-src 'none'",
   };
+
+  if (!isInline) {
+    headers["Content-Disposition"] = getDownloadDisposition(att.filename);
+  }
 
   if (range) {
     headers["Content-Range"] = `bytes ${range.start}-${range.end}/${att.size}`;

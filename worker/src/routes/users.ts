@@ -7,6 +7,7 @@ import * as memoDB from "../db/memo";
 import * as webhookDB from "../db/webhook";
 import { hashPassword } from "../auth/password";
 import { generatePAT, hashPAT } from "../auth/pat";
+import { findActiveUserPayload } from "../auth/user";
 import { exchangeOAuthCode } from "../auth/oauth";
 import { createErrorBody } from "../error";
 import { buildIdentityProviderName, extractIdentityProviderUid } from "../idp";
@@ -247,10 +248,15 @@ userRoutes.post("/", async (c) => {
 
   if (authHeader?.startsWith("Bearer ")) {
     const { verifyAccessToken } = await import("../auth/jwt");
+    let subject: string | undefined;
     try {
       const claims = await verifyAccessToken(authHeader.slice(7), c.env.JWT_SECRET);
-      isAdmin = claims.role === "ADMIN";
+      subject = claims.sub;
     } catch {}
+    if (subject) {
+      const currentUser = await findActiveUserPayload(c.env.DB, subject);
+      isAdmin = currentUser?.role === "ADMIN";
+    }
   }
 
   // Admin can always create users; non-admin can self-register if allowed
@@ -294,6 +300,16 @@ userRoutes.patch("/:username", authRequired, async (c) => {
   const body = await c.req.json();
   const updateData: Parameters<typeof userDB.updateUser>[2] = {};
 
+  if (body.rowStatus !== undefined) {
+    if (currentUser.role !== "ADMIN") {
+      return c.json({ error: "Changing user status requires admin privileges" }, 403);
+    }
+    if (body.rowStatus !== "NORMAL" && body.rowStatus !== "ARCHIVED") {
+      return c.json({ error: "Invalid user status" }, 400);
+    }
+    updateData.row_status = body.rowStatus;
+  }
+
   const generalSetting = await getGeneralSetting(c.env.DB);
 
   if (body.nickname !== undefined || body.displayName !== undefined) {
@@ -307,7 +323,6 @@ userRoutes.patch("/:username", authRequired, async (c) => {
   if (body.description !== undefined) updateData.description = body.description;
   if (body.password) updateData.password_hash = await hashPassword(body.password);
   if (body.role && currentUser.role === "ADMIN") updateData.role = body.role;
-  if (body.rowStatus !== undefined) updateData.row_status = body.rowStatus;
   if (body.username !== undefined) {
     if (currentUser.role === "ADMIN") {
       updateData.username = body.username;

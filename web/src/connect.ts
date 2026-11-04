@@ -267,7 +267,46 @@ export const userServiceClient = {
   async updateUser(req: { user: any; updateMask?: any }) {
     const user = req.user || {};
     const username = extractId(user.name, "users/");
-    const data = await apiRequest<any>("PATCH", `/api/v1/users/${username}`, user);
+    const paths: string[] | undefined = req.updateMask?.paths;
+    const body: Record<string, unknown> = {};
+    const isSelected = (...aliases: string[]) =>
+      paths ? aliases.some((field) => paths.includes(field)) : aliases.some((field) => user[field] !== undefined);
+
+    const fields = [
+      ["username", ["username"]],
+      ["nickname", ["nickname", "displayName", "display_name"]],
+      ["email", ["email"]],
+      ["avatarUrl", ["avatarUrl", "avatar_url"]],
+      ["description", ["description"]],
+      ["password", ["password"]],
+    ] as const;
+    for (const [target, aliases] of fields) {
+      if (isSelected(...aliases)) {
+        const sources =
+          target === "nickname" && paths?.some((field) => field === "displayName" || field === "display_name")
+            ? ["displayName", "display_name", "nickname"]
+            : aliases;
+        body[target] = sources.map((field) => user[field]).find((value) => value !== undefined) ?? "";
+      }
+    }
+
+    if (isSelected("state", "rowStatus", "row_status")) {
+      const state = paths?.some((field) => field === "rowStatus" || field === "row_status")
+        ? (user.rowStatus ?? user.row_status ?? user.state)
+        : (user.state ?? user.rowStatus ?? user.row_status);
+      if (state !== 1 && state !== 2 && state !== "NORMAL" && state !== "ARCHIVED") {
+        throw new Error("Invalid user state");
+      }
+      body.rowStatus = state === 2 || state === "ARCHIVED" ? "ARCHIVED" : "NORMAL";
+    }
+    if (isSelected("role")) {
+      if (user.role !== 2 && user.role !== 3 && user.role !== "ADMIN" && user.role !== "USER") {
+        throw new Error("Invalid user role");
+      }
+      body.role = user.role === 2 || user.role === "ADMIN" ? "ADMIN" : "USER";
+    }
+
+    const data = await apiRequest<any>("PATCH", `/api/v1/users/${username}`, body);
     return normalizeUser(data);
   },
 
@@ -724,7 +763,7 @@ function normalizeUser(data: any): any {
     state: data.rowStatus === "ARCHIVED" ? 2 : 1,
     createTime: isoToTimestamp(data.createTime),
     updateTime: isoToTimestamp(data.updateTime),
-    role: typeof data.role === "string" ? (data.role === "ADMIN" ? 2 : 1) : data.role,
+    role: typeof data.role === "string" ? (data.role === "ADMIN" ? 2 : 3) : data.role,
   };
 }
 

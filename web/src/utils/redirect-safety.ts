@@ -9,6 +9,9 @@ export const AUTH_REASON_PARAM = "reason";
 /** Reason code signalling that the user hit a memo that requires authentication. */
 export const AUTH_REASON_PROTECTED_MEMO = "protected-memo";
 
+const REDIRECT_BASE_URL = "https://memos.invalid";
+const UNSAFE_PATH_CHARACTERS = /[\\\u0000-\u001f\u007f]/;
+
 /**
  * Validates a post-authentication redirect target.
  *
@@ -18,21 +21,36 @@ export const AUTH_REASON_PROTECTED_MEMO = "protected-memo";
  * after sign-in.
  */
 export function getSafeRedirectPath(path: string | null | undefined): string | undefined {
-  if (!path) {
+  if (typeof path !== "string" || !path) {
     return undefined;
   }
 
-  if (!path.startsWith("/") || path.startsWith("//")) {
+  if (!path.startsWith("/") || path.startsWith("//") || UNSAFE_PATH_CHARACTERS.test(path)) {
     return undefined;
   }
 
-  // Never let a redirect target point back into the auth flow — it would either
-  // bounce the user in a guest/auth guard loop or hijack the OAuth callback.
-  if (path === ROUTES.AUTH || path.startsWith(`${ROUTES.AUTH}/`) || path.startsWith(`${ROUTES.AUTH}?`)) {
+  try {
+    const url = new URL(path, REDIRECT_BASE_URL);
+    const decodedPath = decodeURIComponent(url.pathname);
+    if (url.origin !== REDIRECT_BASE_URL || url.pathname.startsWith("//") || UNSAFE_PATH_CHARACTERS.test(decodedPath)) {
+      return undefined;
+    }
+
+    // The browser and router both normalize paths. Check decoded path segments
+    // too so encoded separators cannot hide an external or auth-family target.
+    const normalizedPath = new URL(decodedPath, REDIRECT_BASE_URL);
+    if (normalizedPath.origin !== REDIRECT_BASE_URL || normalizedPath.pathname.startsWith("//")) {
+      return undefined;
+    }
+    const pathname = normalizedPath.pathname.toLowerCase();
+    if (pathname === ROUTES.AUTH || pathname.startsWith(`${ROUTES.AUTH}/`)) {
+      return undefined;
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
     return undefined;
   }
-
-  return path;
 }
 
 /**

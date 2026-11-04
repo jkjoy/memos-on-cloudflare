@@ -2,6 +2,7 @@ import { createMiddleware } from "hono/factory";
 import type { Env, UserPayload } from "../types";
 import { verifyAccessToken } from "../auth/jwt";
 import { hashPAT } from "../auth/pat";
+import { findActiveUserPayload } from "../auth/user";
 
 type AuthEnv = {
   Bindings: Env;
@@ -111,18 +112,20 @@ export const authRequired = createMiddleware<AuthEnv>(async (c, next) => {
     return next();
   }
 
+  let claims: Awaited<ReturnType<typeof verifyAccessToken>>;
   try {
-    const claims = await verifyAccessToken(token, c.env.JWT_SECRET);
-    c.set("user", {
-      id: Number(claims.sub),
-      username: claims.name,
-      role: claims.role,
-      status: claims.status,
-    });
-    return next();
+    claims = await verifyAccessToken(token, c.env.JWT_SECRET);
   } catch {
     return c.json({ code: 16, message: "token has expired", details: [] }, 401);
   }
+
+  const user = await findActiveUserPayload(c.env.DB, claims.sub);
+  if (!user) {
+    return c.json({ code: 16, message: "user not found or archived", details: [] }, 401);
+  }
+
+  c.set("user", user);
+  return next();
 });
 
 export const authOptional = createMiddleware<AuthEnv>(async (c, next) => {
@@ -142,16 +145,18 @@ export const authOptional = createMiddleware<AuthEnv>(async (c, next) => {
         });
       }
     } else {
+      let claims: Awaited<ReturnType<typeof verifyAccessToken>> | undefined;
       try {
-        const claims = await verifyAccessToken(token, c.env.JWT_SECRET);
-        c.set("user", {
-          id: Number(claims.sub),
-          username: claims.name,
-          role: claims.role,
-          status: claims.status,
-        });
+        claims = await verifyAccessToken(token, c.env.JWT_SECRET);
       } catch {
         // Token invalid, continue without user
+      }
+
+      if (claims) {
+        const user = await findActiveUserPayload(c.env.DB, claims.sub);
+        if (user) {
+          c.set("user", user);
+        }
       }
     }
   }

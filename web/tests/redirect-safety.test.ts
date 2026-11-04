@@ -24,11 +24,49 @@ describe("getSafeRedirectPath", () => {
     expect(getSafeRedirectPath("home")).toBeUndefined();
   });
 
+  it.each([
+    "/\\external.example",
+    "/a\\..\\/external.example",
+    "/a/..//external.example",
+    "/a/%2e%2e//external.example",
+    "/%2fexternal.example",
+    "/%5cexternal.example",
+    "/home\n",
+    "/home\t?x=1",
+    "/home\u0000",
+    "/home%0a",
+    "/home%7f",
+  ])("rejects ambiguous browser/router target %j", (path) => {
+    expect(getSafeRedirectPath(path)).toBeUndefined();
+  });
+
+  it("normalizes safe dot segments while preserving queries and anchors", () => {
+    expect(getSafeRedirectPath("/memos/../home?filter=tag%3Atest#today")).toBe("/home?filter=tag%3Atest#today");
+    expect(getSafeRedirectPath("/memos/%2e%2e/explore?next=%2Fauth#anchor")).toBe("/explore?next=%2Fauth#anchor");
+    expect(getSafeRedirectPath("/u/%E5%B0%8F%E6%98%8E")).toBe("/u/%E5%B0%8F%E6%98%8E");
+  });
+
   it("rejects auth-family targets", () => {
     expect(getSafeRedirectPath("/auth")).toBeUndefined();
     expect(getSafeRedirectPath("/auth/callback")).toBeUndefined();
     expect(getSafeRedirectPath("/auth/signup")).toBeUndefined();
     expect(getSafeRedirectPath("/auth?code=abc")).toBeUndefined();
+  });
+
+  it.each([
+    "/auth#fragment",
+    "/AUTH/callback",
+    "/%61uth/signup",
+    "/auth%2fcallback",
+    "/home/../auth/callback",
+    "/home/%2e%2e/auth",
+    "/home%2f..%2fauth",
+  ])("rejects normalized auth-family target %j", (path) => {
+    expect(getSafeRedirectPath(path)).toBeUndefined();
+  });
+
+  it("rejects malformed encoded pathnames", () => {
+    expect(getSafeRedirectPath("/memos/%zz")).toBeUndefined();
   });
 
   it("does not false-match auth-like paths", () => {
@@ -41,6 +79,7 @@ describe("buildAuthRoute", () => {
     expect(buildAuthRoute({ redirect: "/home" })).toBe("/auth?redirect=%2Fhome");
     expect(buildAuthRoute({ redirect: "//evil.example" })).toBe("/auth");
     expect(buildAuthRoute({ redirect: "/auth/callback" })).toBe("/auth");
+    expect(buildAuthRoute({ redirect: "/a\\..\\/external.example" })).toBe("/auth");
     expect(buildAuthRoute({ redirect: null })).toBe("/auth");
   });
 

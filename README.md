@@ -16,7 +16,7 @@
 
 ## 前置要求
 
-- [Node.js](https://nodejs.org/) >= 18
+- [Node.js](https://nodejs.org/) >= 22.13
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) >= 4.14
 - Cloudflare 账号（已开通 Workers、D1、R2）
 
@@ -109,6 +109,10 @@ npm run dev:web
 ```
 
 浏览器访问 `http://localhost:3001`。
+
+运行 `npm test` 执行后端安全回归测试（使用本地内存 SQLite，不连接 Cloudflare），运行 `npm --prefix web test` 执行前端测试。
+
+前端通过 `overrides.katex: "$katex"` 让 Markdown 插件和 Mermaid 共用已修复的 KaTeX 版本；升级时应同时验证公式和图表回归测试。
 
 ## 项目结构
 

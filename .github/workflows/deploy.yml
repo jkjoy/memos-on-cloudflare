@@ -17,10 +17,21 @@ jobs:
           cache: npm
 
       - name: Install root dependencies
-        run: npm install
+        run: npm ci
 
       - name: Install frontend dependencies
-        run: cd web && npm install
+        run: cd web && npm ci
+
+      - name: Check backend types and security regressions
+        run: |
+          npx tsc --noEmit
+          npm test
+
+      - name: Check frontend types and tests
+        working-directory: web
+        run: |
+          npx tsc --noEmit --skipLibCheck
+          npm test
 
       - name: Build frontend
         run: npm run build:web
